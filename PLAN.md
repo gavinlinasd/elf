@@ -1,158 +1,256 @@
 # OpenClaw Job Queue Skill — Execution Plan
 
-## Project Structure
+## How OpenClaw Skills Work (Context)
+
+OpenClaw skills are **folders with a `SKILL.md` file**. That's the core contract.
+
+- **Tools** = "organs" — they determine what OpenClaw *can* do (shell, HTTP, browser, etc.)
+- **Skills** = "textbooks" — they teach OpenClaw *how* to combine tools for a specific job
+
+A skill folder contains:
+- `SKILL.md` — YAML frontmatter (metadata) + markdown body (instructions for the agent)
+- Supporting files — scripts, templates, configs, whatever the skill needs
+
+Skills are distributed via **ClawHub** (`clawhub install <slug>`) or by pointing the agent at a GitHub repo URL in chat. The Gateway loads skill instructions into the agent's context when activated.
+
+**Key insight**: OpenClaw skills don't register custom "tool endpoints." They teach the agent to use *existing* tools (shell commands, HTTP requests, file operations) in a specific way. Our job queue skill will use shell scripts that the agent calls via the `shell` tool.
+
+---
+
+## Absolute Minimum MVP
+
+The question: what's the least amount of code that delivers real value?
+
+**Cut list** (defer to later):
+- ~~Dashboard UI~~ — CLI output is enough for MVP
+- ~~WebSocket real-time updates~~ — polling/CLI is fine
+- ~~Express API server~~ — not needed without dashboard
+- ~~Stall monitor~~ — Bull MQ has built-in stall detection
+- ~~Embedded Redis auto-start~~ — user provides Redis (or we use SQLite)
+
+**What stays**:
+1. SKILL.md that teaches the agent to use queue tools
+2. CLI scripts the agent can invoke via shell
+3. Bull MQ + Redis backend (or simpler: SQLite-based queue for zero-dep)
+4. Core operations: enqueue, status, list, retry, cancel
+
+### MVP Decision: Redis vs SQLite
+
+**Option A — Bull MQ + Redis** (original plan)
+- Pro: Battle-tested, real job queue semantics, concurrent workers
+- Con: Requires Redis running, heavier dependency
+
+**Option B — SQLite queue** (simpler)
+- Pro: Zero external dependencies, single file, works everywhere
+- Con: No real worker process, polling-based, less battle-tested
+
+**Recommendation**: Go with **Bull MQ + Redis** but make Redis a documented prerequisite (most OpenClaw users already have it or can `brew install redis` / `apt install redis`). This is the OpenClaw ecosystem norm — skills commonly require external services.
+
+---
+
+## MVP Project Structure
 
 ```
 openclaw-job-queue/
+├── SKILL.md                    # OpenClaw skill manifest + agent instructions
 ├── package.json
 ├── tsconfig.json
-├── SKILL.md                    # OpenClaw skill manifest
-├── README.md
 ├── .env.example
-├── docker-compose.yml          # Optional: Redis for dev
+├── README.md
 │
 ├── src/
-│   ├── index.ts                # Skill entry point — registers hooks + starts services
-│   ├── config.ts               # Env-based configuration (ports, Redis URL, retries, etc.)
+│   ├── index.ts                # Entry point — starts queue worker
+│   ├── config.ts               # Env-based configuration
+│   ├── queue.ts                # Bull MQ queue + worker setup
+│   ├── types.ts                # Task data model
 │   │
-│   ├── queue/
-│   │   ├── client.ts           # Bull MQ queue + worker setup
-│   │   ├── processor.ts        # Task processor — executes OpenClaw task payloads
-│   │   ├── stall-monitor.ts    # Heartbeat-based stall detection
-│   │   └── types.ts            # Task data model, status enums
-│   │
-│   ├── tools/
-│   │   ├── enqueue-task.ts     # enqueue_task tool handler
-│   │   ├── get-task-status.ts  # get_task_status tool handler
-│   │   ├── list-tasks.ts       # list_tasks tool handler
-│   │   ├── retry-task.ts       # retry_task tool handler
-│   │   └── cancel-task.ts      # cancel_task tool handler
-│   │
-│   ├── api/
-│   │   ├── server.ts           # Express/Fastify server for dashboard API
-│   │   ├── routes.ts           # REST endpoints (GET /tasks, GET /tasks/:id, GET /stats)
-│   │   └── ws.ts               # WebSocket handler for real-time updates
-│   │
-│   └── redis/
-│       └── embedded.ts         # Auto-start bundled Redis if none available
-│
-├── dashboard/
-│   ├── index.html              # Single HTML entry point
-│   ├── style.css               # Minimal styling
-│   └── app.js                  # Vanilla JS — task list, filters, stats bar, WS connection
+│   └── cli/                    # CLI commands the agent invokes via shell
+│       ├── enqueue.ts          # npx jq-enqueue <name> <payload>
+│       ├── status.ts           # npx jq-status <task-id>
+│       ├── list.ts             # npx jq-list [--status=failed]
+│       ├── retry.ts            # npx jq-retry <task-id>
+│       └── cancel.ts           # npx jq-cancel <task-id>
 │
 └── test/
-    ├── queue.test.ts           # Queue lifecycle tests
-    ├── tools.test.ts           # Tool handler unit tests
-    └── api.test.ts             # API endpoint tests
+    └── queue.test.ts           # Core lifecycle tests
+```
+
+That's **~10 files**. No dashboard, no API server, no WebSocket layer.
+
+---
+
+## MVP Execution Steps (4 steps, not 9)
+
+### Step 1: Scaffold + SKILL.md
+- `package.json` with `bin` entries mapping CLI commands
+- `tsconfig.json`
+- `SKILL.md` with proper OpenClaw frontmatter + agent instructions
+- `.env.example`
+
+The SKILL.md is the most important file. It tells the agent:
+- What this skill does
+- What CLI commands are available
+- When and how to use each command
+- How to interpret output
+
+Example SKILL.md structure:
+```yaml
+---
+name: job-queue
+description: Track and manage async task execution with a local job queue.
+version: 1.0.0
+metadata:
+  openclaw:
+    requires:
+      env:
+        - REDIS_URL
+      bins:
+        - node
+        - npx
+    primaryEnv: REDIS_URL
+---
+```
+
+Followed by markdown instructions the agent reads at runtime.
+
+### Step 2: Queue Engine + Types
+- `src/types.ts` — Task interface, status enum
+- `src/config.ts` — Load REDIS_URL, MAX_RETRIES, etc.
+- `src/queue.ts` — Bull MQ queue, worker, processor, event handlers
+
+### Step 3: CLI Commands
+- 5 CLI scripts, each a standalone executable:
+  - `jq-enqueue` — adds job, prints task ID
+  - `jq-status` — prints task detail as JSON
+  - `jq-list` — prints task table, supports `--status` filter
+  - `jq-retry` — retries a failed task
+  - `jq-cancel` — cancels a queued/running task
+- Register as `bin` entries in `package.json` so they work via `npx`
+
+### Step 4: Tests + README
+- Queue lifecycle test (enqueue → process → complete/fail → retry)
+- README with installation and usage instructions
+
+---
+
+## Integration with OpenClaw
+
+### How a User Installs This Skill
+
+**Option 1 — ClawHub (after publishing)**
+```bash
+npm i -g clawhub          # one-time: install ClawHub CLI
+clawhub install job-queue  # installs skill into OpenClaw workspace
+```
+
+**Option 2 — GitHub URL (works immediately, no publishing needed)**
+Paste the GitHub repo URL into any OpenClaw chat channel:
+> "Install and use the skill at https://github.com/<user>/openclaw-job-queue"
+
+The agent will clone the repo into its skills directory and read the SKILL.md.
+
+**Option 3 — Manual install**
+```bash
+cd ~/.openclaw/skills      # or wherever your OpenClaw skills directory is
+git clone https://github.com/<user>/openclaw-job-queue job-queue
+cd job-queue && npm install
+```
+
+### How OpenClaw Uses the Skill at Runtime
+
+1. User sends a message to OpenClaw (via WhatsApp, Slack, etc.)
+2. Gateway routes message to an agent session
+3. Agent's context includes the SKILL.md instructions from all active skills
+4. When the agent decides to track a task, it follows the SKILL.md instructions
+5. The agent calls the CLI tools via OpenClaw's `shell` tool:
+   ```
+   npx jq-enqueue "send-email" '{"to":"alice@example.com","subject":"Report"}'
+   ```
+6. The CLI prints structured output the agent can parse and relay to the user
+
+### Prerequisites for the User
+
+```bash
+# 1. Redis must be running
+brew install redis && brew services start redis
+# or: docker run -d -p 6379:6379 redis
+
+# 2. Set REDIS_URL in OpenClaw environment
+# In your OpenClaw .env or workspace config:
+REDIS_URL=redis://localhost:6379
+
+# 3. Start the queue worker (runs alongside OpenClaw)
+cd ~/.openclaw/skills/job-queue
+npm start
+```
+
+### What the Agent Sees (SKILL.md body)
+
+The markdown body of SKILL.md will contain instructions like:
+
+```markdown
+## Job Queue Skill
+
+You have access to a local job queue for tracking async task execution.
+
+### Available Commands
+
+#### Enqueue a task
+`npx jq-enqueue <task-name> '<json-payload>' [--priority=<0-10>]`
+Returns: task ID (UUID)
+
+#### Check task status
+`npx jq-status <task-id>`
+Returns: JSON with status, timestamps, error info
+
+#### List tasks
+`npx jq-list [--status=queued|running|completed|failed] [--limit=20]`
+Returns: table of tasks
+
+#### Retry a failed task
+`npx jq-retry <task-id>`
+
+#### Cancel a task
+`npx jq-cancel <task-id>`
+
+### When to Use
+- Before starting a long-running operation, enqueue it
+- After enqueuing, report the task ID to the user
+- Periodically check status of running tasks
+- If a task fails, check the error and decide whether to retry
 ```
 
 ---
 
-## Execution Steps
+## Publishing to ClawHub (Post-MVP)
 
-### Step 1: Project Scaffolding
-- Initialize `package.json` with name, version, scripts
-- Set up TypeScript config (`tsconfig.json`)
-- Install core dependencies: `bullmq`, `ioredis`, `express`, `ws`, `uuid`
-- Install dev dependencies: `typescript`, `tsx`, `vitest`
-- Create `.env.example` with all configurable env vars
-- Create `SKILL.md` — OpenClaw skill manifest describing capabilities and tools
+```bash
+npm i -g clawhub
+clawhub login
+clawhub publish .    # publishes from skill directory
+```
 
-### Step 2: Configuration & Data Model
-- `src/config.ts` — Load env vars with sensible defaults (port 7700, Redis localhost:6379, 3 retries, 30s heartbeat, 7-day retention)
-- `src/queue/types.ts` — Define `Task` interface, `TaskStatus` enum, priority types
-
-### Step 3: Queue Engine (Core)
-- `src/queue/client.ts` — Initialize Bull MQ queue and worker; wire up event listeners for state transitions (queued → running → completed/failed/stalled)
-- `src/queue/processor.ts` — Task processor function that executes payloads; reports progress; handles errors
-- `src/queue/stall-monitor.ts` — Heartbeat checker; marks jobs as stalled after configurable interval
-- `src/redis/embedded.ts` — Attempt connection to configured Redis; if unavailable, spawn a bundled `redis-server` child process (or warn user to install)
-
-### Step 4: Skill Tool Handlers
-- `src/tools/enqueue-task.ts` — Validate input, add job to Bull MQ with priority, return task ID
-- `src/tools/get-task-status.ts` — Fetch job by ID, return current state + timestamps + error info
-- `src/tools/list-tasks.ts` — Query jobs by status filter, return paginated list
-- `src/tools/retry-task.ts` — Move failed job back to queue, reset attempt count
-- `src/tools/cancel-task.ts` — Remove queued job or signal abort to running job
-
-### Step 5: Dashboard API
-- `src/api/server.ts` — Express server on configurable port; serves static dashboard files + API routes
-- `src/api/routes.ts` — REST endpoints:
-  - `GET /api/tasks` — list with filtering/pagination
-  - `GET /api/tasks/:id` — single task detail
-  - `GET /api/stats` — aggregate stats (total today, success rate, avg duration, active count)
-- `src/api/ws.ts` — WebSocket endpoint at `/ws`; broadcasts task state changes in real time
-
-### Step 6: Dashboard UI
-- `dashboard/index.html` — Single-page layout: stats bar at top, filterable task table, task detail panel
-- `dashboard/style.css` — Clean, minimal dark theme; status color coding (green/red/yellow/blue/gray)
-- `dashboard/app.js` — Vanilla JS:
-  - Fetch tasks from API on load
-  - Connect WebSocket for live updates
-  - Filter buttons (all / queued / running / completed / failed / stalled)
-  - Click-to-expand task detail (payload, timestamps, duration, error log)
-  - Stats bar auto-updates
-
-### Step 7: Entry Point & Wiring
-- `src/index.ts` — Orchestrates startup:
-  1. Load config
-  2. Ensure Redis connection (auto-start if needed)
-  3. Initialize Bull MQ queue + worker
-  4. Start stall monitor
-  5. Start dashboard API server
-  6. Register skill tools with OpenClaw
-  7. Log startup summary (dashboard URL, Redis status, queue ready)
-
-### Step 8: Tests
-- `test/queue.test.ts` — Enqueue, process, complete, fail, retry, cancel lifecycle
-- `test/tools.test.ts` — Each tool handler with mocked queue
-- `test/api.test.ts` — API routes return correct data, filters work, stats aggregate correctly
-
-### Step 9: Polish & Docs
-- `README.md` — Installation, quick start, configuration reference, architecture diagram
-- `docker-compose.yml` — Optional Redis for dev environments
-- npm scripts: `start`, `dev`, `test`, `build`
-
----
-
-## Dependencies
-
-**Runtime:**
-- `bullmq` — Job queue on Redis
-- `ioredis` — Redis client
-- `express` — Dashboard API server
-- `ws` — WebSocket for real-time updates
-- `uuid` — Task ID generation
-
-**Dev:**
-- `typescript`
-- `tsx` — Dev runner
-- `vitest` — Testing
-- `@types/express`, `@types/ws`
+This makes it available via `clawhub install job-queue` for all OpenClaw users.
 
 ---
 
 ## Order of Operations
 
 ```
-Step 1 (scaffold) → Step 2 (config/types) → Step 3 (queue core) → Step 4 (tools)
-                                                                        ↓
-                                              Step 7 (wiring) ← Step 5 (API) → Step 6 (UI)
-                                                     ↓
-                                              Step 8 (tests) → Step 9 (docs)
+Step 1 (SKILL.md + scaffold)  →  Step 2 (queue engine)  →  Step 3 (CLI commands)  →  Step 4 (tests + docs)
 ```
 
-Steps 5 and 6 can be done in parallel. Everything else is sequential.
+Strictly sequential. Estimated ~10 files total.
 
 ---
 
-## What This Plan Does NOT Include (Phase 2+)
-- Notification/webhook layer
-- Desktop notifications
-- CLI-only headless mode
-- Skill registry publishing
-- Task retention auto-pruning cron
-- Embeddable gateway UI
+## What's Deferred (Phase 2+)
 
-These are explicitly deferred to Phase 2/3 per the PRD.
+- Dashboard UI (web-based task viewer)
+- REST API + WebSocket layer
+- Embedded Redis auto-start
+- Stall detection beyond Bull MQ built-in
+- Webhook/notification support
+- Task retention auto-pruning
+- ClawHub publishing
+- CLI-only headless mode
