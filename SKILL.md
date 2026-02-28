@@ -1,7 +1,7 @@
 ---
-name: job-queue
-description: Track and manage async task execution with a local job queue backed by Bull MQ and Redis.
-version: 1.0.0
+name: elf
+description: Agent-driven task coordination — create, claim, execute, and report tasks via a Redis-backed queue.
+version: 2.0.0
 metadata:
   openclaw:
     requires:
@@ -10,53 +10,89 @@ metadata:
       bins:
         - node
         - npx
+    install:
+      - kind: node
+        path: .
+      - kind: brew
+        package: redis
     primaryEnv: REDIS_URL
-    emoji: 📋
+    emoji: 🧝
 ---
 
-## Job Queue Skill
+## Elf — Task Coordination Skill
 
-You have access to a local job queue for tracking async task execution. Jobs are persisted in Redis via Bull MQ and survive restarts.
+You have a task queue for coordinating work. Tasks are persisted in Redis and survive restarts.
 
-### Available Commands
+**You are the executor.** Create tasks, claim them, do the work, then report the outcome. The queue tracks what's pending, who's working on what, and what's done.
 
-#### Enqueue a task
-```
-npx jq-enqueue <task-name> '<json-payload>' [--priority=<1-10>]
-```
-Creates a new job and returns its ID. Priority 1 = lowest, 10 = highest. Default: 5.
+### Workflow
 
-#### Check task status
+1. Create a task: `npx elf-do-this <name> '<payload>'`
+2. Claim it before starting work: `npx elf-on-it <id>`
+3. Do the actual work (run commands, edit files, call APIs, etc.)
+4. Report the outcome:
+   - Success: `npx elf-done <id> '<result-json>'`
+   - Failure: `npx elf-borked <id> '<error-message>'`
+
+### Commands
+
+#### Create a task
 ```
-npx jq-status <task-id>
+npx elf-do-this <task-name> '<json-payload>' [--priority=<1-10>]
 ```
-Returns JSON with status, timestamps, progress, result, or error details.
+Returns the task ID. Priority 1 = lowest, 10 = highest. Default: 5.
+
+#### Claim a task
+```
+npx elf-on-it <task-id> [--agent=<agent-id>]
+```
+Marks the task as running. Prevents other agents from double-executing it.
+
+#### Mark task complete
+```
+npx elf-done <task-id> ['<result-json>']
+```
+Records the result and marks the task as completed.
+
+#### Mark task failed
+```
+npx elf-borked <task-id> '<error-message>'
+```
+Records what went wrong. Different from cancel — this means "I tried and it broke."
+
+#### Check a task
+```
+npx elf-is-it-done <task-id>
+```
+Returns full task detail as JSON (status, payload, result, error, timestamps).
 
 #### List tasks
 ```
-npx jq-list [--status=queued|running|completed|failed] [--limit=20]
+npx elf-whats-left [--status=queued|running|completed|failed|cancelled] [--limit=20]
 ```
-Prints a table of tasks. Without `--status`, shows all. Default limit: 20.
-
-#### Retry a failed task
-```
-npx jq-retry <task-id>
-```
-Re-enqueues a failed task for another attempt.
+Prints a table of tasks. Without `--status`, shows all.
 
 #### Cancel a task
 ```
-npx jq-cancel <task-id>
+npx elf-nevermind <task-id>
 ```
-Removes a queued task or signals a running task to stop.
+Removes a queued task or marks a running task as cancelled. Means "don't bother."
+
+#### Queue health
+```
+npx elf-status
+```
+Checks Redis connectivity and shows task counts by status.
 
 ### When to Use
 
-- Before starting a long-running operation, enqueue it so progress is tracked
-- After enqueuing, report the task ID to the user
-- Periodically check status of running tasks when the user asks
-- If a task fails, inspect the error and decide whether to retry
+- Before starting a multi-step operation, create a task so progress is tracked
+- Always claim before doing work — this prevents duplicate execution in multi-agent setups
+- After finishing, report with `elf-done` or `elf-borked` — don't leave tasks hanging
+- If a task failed, read the error with `elf-is-it-done`, understand why, fix the root cause, and create a new task
+- Check `elf-whats-left --status=queued` to find pending work
+- Run `elf-status` to verify Redis is reachable
 
 ### Output Format
 
-All commands print structured output. `jq-status` returns JSON. `jq-list` returns a formatted table. Other commands print a single confirmation line with the task ID.
+`elf-is-it-done` returns JSON. `elf-whats-left` returns a formatted table. `elf-status` returns queue statistics. All other commands print a single confirmation line with the task ID.

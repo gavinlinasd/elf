@@ -10,6 +10,9 @@ export interface TaskData {
   name: string;
   payload: Record<string, unknown>;
   priority?: number;
+  claimedBy?: string;
+  result?: unknown;
+  error?: string;
 }
 
 export interface TaskInfo {
@@ -18,11 +21,9 @@ export interface TaskInfo {
   status: TaskStatus;
   payload: Record<string, unknown>;
   priority: number;
-  progress: number;
   result?: unknown;
   error?: string;
-  attempts: number;
-  maxRetries: number;
+  claimedBy?: string;
   createdAt: number;
   startedAt?: number;
   completedAt?: number;

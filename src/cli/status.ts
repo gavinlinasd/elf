@@ -1,24 +1,24 @@
 #!/usr/bin/env node
-import { getTaskInfo } from "../queue.js";
+import { getQueueCounts, queue } from "../queue.js";
+import { config } from "../config.js";
+import { withConnection } from "./util.js";
 
-async function main() {
-  const taskId = process.argv[2];
-  if (!taskId) {
-    console.error("Usage: jq-status <task-id>");
-    process.exit(1);
-  }
+withConnection(async () => {
+  const counts = await getQueueCounts();
+  const total =
+    counts.queued +
+    counts.running +
+    counts.completed +
+    counts.failed +
+    counts.cancelled;
 
-  const info = await getTaskInfo(taskId);
-  if (!info) {
-    console.error(`Error: task ${taskId} not found`);
-    process.exit(1);
-  }
-
-  console.log(JSON.stringify(info, null, 2));
-  process.exit(0);
-}
-
-main().catch((err) => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
+  console.log(`elf-status — connected to ${config.redisUrl}`);
+  console.log(`queue: ${config.queueName}`);
+  console.log("");
+  console.log(`  queued:    ${counts.queued}`);
+  console.log(`  running:   ${counts.running}`);
+  console.log(`  completed: ${counts.completed}`);
+  console.log(`  failed:    ${counts.failed}`);
+  console.log(`  cancelled: ${counts.cancelled}`);
+  console.log(`  total:     ${total}`);
 });

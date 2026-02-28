@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { listTasks } from "../queue.js";
-import { TaskStatus, TaskInfo } from "../types.js";
+import { TaskStatus } from "../types.js";
+import { withConnection } from "./util.js";
 
-async function main() {
+withConnection(async () => {
   const args = process.argv.slice(2);
 
   let status: TaskStatus | undefined;
@@ -10,7 +11,9 @@ async function main() {
   if (statusArg) {
     const val = statusArg.split("=")[1] as TaskStatus;
     if (!Object.values(TaskStatus).includes(val)) {
-      console.error(`Error: invalid status. Use: ${Object.values(TaskStatus).join(", ")}`);
+      console.error(
+        `Error: invalid status. Use: ${Object.values(TaskStatus).join(", ")}`
+      );
       process.exit(1);
     }
     status = val;
@@ -29,19 +32,14 @@ async function main() {
     process.exit(0);
   }
 
-  // Print table
-  const header = "ID\tSTATUS\tNAME\tATTEMPTS\tCREATED";
+  const header = "ID\tSTATUS\tNAME\tCLAIMED BY\tCREATED";
   console.log(header);
-  console.log("-".repeat(72));
+  console.log("-".repeat(80));
   for (const t of tasks) {
     const created = new Date(t.createdAt).toISOString();
-    console.log(`${t.id}\t${t.status}\t${t.name}\t${t.attempts}/${t.maxRetries}\t${created}`);
+    console.log(
+      `${t.id}\t${t.status}\t${t.name}\t${t.claimedBy || "-"}\t${created}`
+    );
   }
   console.log(`\n${tasks.length} task(s)`);
-  process.exit(0);
-}
-
-main().catch((err) => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
 });

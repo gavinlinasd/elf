@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { enqueueTask } from "../queue.js";
+import { withConnection } from "./util.js";
 
-async function main() {
+withConnection(async () => {
   const args = process.argv.slice(2);
   if (args.length < 2) {
-    console.error("Usage: jq-enqueue <task-name> '<json-payload>' [--priority=<1-10>]");
+    console.error("Usage: elf-do-this <task-name> '<json-payload>' [--priority=<1-10>]");
     process.exit(1);
   }
 
@@ -25,10 +26,4 @@ async function main() {
 
   const id = await enqueueTask(name, payload, priority);
   console.log(`enqueued ${id}`);
-  process.exit(0);
-}
-
-main().catch((err) => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
 });

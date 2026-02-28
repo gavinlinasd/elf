@@ -1,7 +1,7 @@
 {
-  "name": "openclaw-job-queue",
-  "version": "1.0.0",
-  "description": "OpenClaw skill for tracking async task execution with a local job queue",
+  "name": "elf",
+  "version": "2.0.0",
+  "description": "OpenClaw skill for agent-driven task coordination backed by BullMQ and Redis",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -9,11 +9,14 @@
     "test": "vitest run"
   },
   "bin": {
-    "jq-enqueue": "dist/cli/enqueue.js",
-    "jq-status": "dist/cli/status.js",
-    "jq-list": "dist/cli/list.js",
-    "jq-retry": "dist/cli/retry.js",
-    "jq-cancel": "dist/cli/cancel.js"
+    "elf-do-this": "dist/cli/do-this.js",
+    "elf-on-it": "dist/cli/on-it.js",
+    "elf-done": "dist/cli/done.js",
+    "elf-borked": "dist/cli/borked.js",
+    "elf-is-it-done": "dist/cli/is-it-done.js",
+    "elf-whats-left": "dist/cli/whats-left.js",
+    "elf-nevermind": "dist/cli/nevermind.js",
+    "elf-status": "dist/cli/status.js"
   },
   "dependencies": {
     "bullmq": "^5.0.0"

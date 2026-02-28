@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { cancelTask } from "../queue.js";
+import { withConnection } from "./util.js";
 
-async function main() {
+withConnection(async () => {
   const taskId = process.argv[2];
   if (!taskId) {
-    console.error("Usage: jq-cancel <task-id>");
+    console.error("Usage: elf-nevermind <task-id>");
     process.exit(1);
   }
 
@@ -15,10 +16,4 @@ async function main() {
   }
 
   console.log(`cancelled ${taskId}`);
-  process.exit(0);
-}
-
-main().catch((err) => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
 });
