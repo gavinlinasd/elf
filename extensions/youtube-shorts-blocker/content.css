@@ -1,0 +1,31 @@
+/* Left nav Shorts entry */
+ytd-guide-entry-renderer:has(a[href^="/shorts"]) {
+  display: none !important;
+}
+
+/* Shorts shelf, reel, and compact modules on home/watch/search/channels */
+ytd-rich-section-renderer:has(a[href^="/shorts"]),
+ytd-reel-shelf-renderer,
+ytd-reel-item-renderer,
+ytm-shorts-lockup-view-model,
+ytm-rich-grid-slim-media:has(a[href*="/shorts/"]) {
+  display: none !important;
+}
+
+/* Shorts tab on channel pages */
+tp-yt-paper-tab:has(a[href*="/shorts"]),
+.ytd-c4-tabbed-header-renderer a[href*="/shorts"] {
+  display: none !important;
+}
+
+/* Mobile chips or pills labeled Shorts can still leak in some layouts */
+a[href^="/shorts"],
+a[href*="/shorts/"] {
+  position: relative;
+}
+
+html[data-shorts-blocker="on"] a[href^="/shorts"],
+html[data-shorts-blocker="on"] a[href*="/shorts/"] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
